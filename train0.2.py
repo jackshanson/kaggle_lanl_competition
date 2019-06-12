@@ -18,6 +18,7 @@ NFFT = 1024
 SEG_LEN = 150000
 nfft=1024
 nfilt = 24
+SEG_SHIFT = int(SEG_LEN/2)
 bin = np.floor(np.linspace(0,nfft/2-2,nfilt+2))
 fbank = np.zeros([nfilt,nfft//2-1])
 for j in range(0,nfilt):
@@ -43,11 +44,10 @@ def get_train_valid_test_samples(X_train_full,Y_train_full,X_test_full,train_ind
 
 
 
-'''
 with open('../lanl_earthquake_prediction/train.csv','r') as f:
     full_train_dat = pd.read_csv(f)
 print('CSV loaded')
-NUM_TRAIN_SEGS = int(len(full_train_dat)/SEG_LEN)
+NUM_TRAIN_SEGS = int(len(full_train_dat)/SEG_SHIFT)
 
 
 test_ids = []    
@@ -63,11 +63,11 @@ NUM_TEST_SEGS = len(test_ids)
 
 
 
+'''
 
-
-def get_features(dat_frame,orig_dat_frame,seglen=150000,labels=None):
-    for S in tqdm.tqdm(range(int(len(orig_dat_frame)/seglen))):
-        seg = orig_dat_frame.iloc[S*seglen:(S+1)*seglen]
+def get_features(dat_frame,orig_dat_frame,seglen=150000,segshift=150000,labels=None):
+    for S in tqdm.tqdm(range(int(len(orig_dat_frame)/segshift))):
+        seg = orig_dat_frame.iloc[S*segshift:S*segshift+seglen]
         xdat = pd.Series(seg['acoustic_data'].values)
         if labels is not None:
             labels.loc[S,'label'] = seg['time_to_failure'].values[-1]
@@ -133,10 +133,10 @@ X_tr = pd.DataFrame(index=range(NUM_TRAIN_SEGS), dtype=np.float64)
 X_te = pd.DataFrame(index=range(NUM_TEST_SEGS), dtype=np.float64)
 Y_tr = pd.DataFrame(index=range(NUM_TRAIN_SEGS), dtype=np.float64)
 
-X_tr,Y_tr = get_features(X_tr,full_train_dat,labels=Y_tr)
+X_tr,Y_tr = get_features(X_tr,full_train_dat,segshift = SEG_SHIFT,labels=Y_tr)
 X_te = get_features(X_te,full_test_dat)
 
-with open('all_data_no_last.p','wb') as f:
+with open('all_data_no_last_with_overlap.p','wb') as f:
     pickle.dump({'X_tr':X_tr,'Y_tr':Y_tr,'X_te':X_te,'test_ids':test_ids},f)
 '''
 
@@ -211,6 +211,7 @@ for eta in eta_vals:
             grid_search_results[-1][2] /= float(n_fold)
             grid_search_results[-1].append(scores_total)
             grid_search_results[-1].append('XGboost')
+            grid_search_results[-1].append(feature_importance)
             if scores_total < min_score:
                 min_score = scores_total 
                 best_params = grid_search_results[-1][0]
@@ -232,7 +233,8 @@ plt.figure(1);
 sns.barplot(x="importance", y="feature", data=best_features.sort_values(by="importance", ascending=False));
 plt.title('XGboost Features (avg over folds)');
         
-    
+#with open('XGBoost_results.p','wb') as f:
+#    pickle.dump(grid_search_results,f)
 #-------------------------------------------------------------------------------
 # LIGHTGBM----------------------------------------------------------------------
 #-------------------------------------------------------------------------------
@@ -288,6 +290,7 @@ for leaves in leaves_vals:
                 scores2_total = np.mean(scores2_fold)
                 grid_search_results2[-1].append(scores2_total)
                 grid_search_results2[-1].append('LightGBM')
+                grid_search_results2[-1].append(feature_importance2)
                 if scores2_total < min_score2:
                     min_score2 = scores2_total 
                     best_params2 = grid_search_results2[-1][0]
@@ -308,7 +311,8 @@ plt.figure(2);
 sns.barplot(x="importance", y="feature", data=best_features2.sort_values(by="importance", ascending=False));
 plt.title('LGB Features (avg over folds)');
         
-
+#with open('LightGBM_results.p','wb') as f:
+#    pickle.dump(grid_search_results2,f)
 
 #-------------------------------------------------------------------------------
 #NuSVM--------------------------------------------------------------------------
@@ -341,6 +345,7 @@ for nu in nuvals:
         grid_search_results3[-1][2] /= n_fold
         grid_search_results3[-1].append(scores3_total)
         grid_search_results3[-1].append('NuSVR')
+        grid_search_results3[-1].append([])
         if scores3_total < min_score3:
             min_score3 = scores3_total 
             best_params3 = grid_search_results3[-1][0]
@@ -349,6 +354,9 @@ for nu in nuvals:
 print('Best parameters for NuSVM...')
 print(best_params3)
 
+
+#with open('NuSVM_results.p','wb') as f:
+#    pickle.dump(grid_search_results3,f)
     
 #-------------------------------------------------------------------------------
 #Neural Network-----------------------------------------------------------------
@@ -390,9 +398,9 @@ for N in num_units:
             for fold_n, (train_index,valid_index) in enumerate(folds.split(X_train_scaled)):
                 X_train,X_valid,X_test,Y_train,Y_valid =  get_train_valid_test_samples(X_train_scaled,Y_tr,X_test_scaled,train_index,valid_index)    
                 
-                #X_train = X_train.iloc[:,inds==1]
-                #X_valid = X_valid.iloc[:,inds==1]
-                #X_test = X_test.iloc[:,inds==1]
+                X_train = X_train.iloc[:,inds==1]
+                X_valid = X_valid.iloc[:,inds==1]
+                X_test = X_test.iloc[:,inds==1]
 
                 inputs = tf.keras.Input(shape=(X_train.shape[1],), name='features')
                 tmp_in = inputs
@@ -428,6 +436,7 @@ for N in num_units:
             grid_search_results4[-1][2] /= n_fold
             grid_search_results4[-1].append(scores4_total)
             grid_search_results4[-1].append('MLP')
+            grid_search_results4[-1].append([])
             if scores4_total < min_score4:
                 print('NEW BEST MODEL!')
                 min_score4 = scores4_total
@@ -439,7 +448,8 @@ for N in num_units:
 #prediction[-1] /= n_fold
 
 
-
+#with open('MLP_results.p','wb') as f:
+#    pickle.dump(grid_search_results4,f)
 
 
 
